@@ -1,47 +1,70 @@
-const container = document.getElementById("root");
-const ajax = new XMLHttpRequest();
+type Store = {
+  currentPage: number;
+  feeds: NewsFeed[];
+};
+
+type News = {
+  id: number;
+  time_ago: string;
+  title: string;
+  url: string;
+  user: string;
+  content: string;
+};
+
+type NewsFeed = News & {
+  comments_count: number;
+  points: number;
+  read?: boolean;
+};
+
+type NewsDetail = News & {
+  comments: [];
+};
+
+type NewsComment = News & {
+  comments: NewsComment[];
+  level: number;
+};
+
+const container: HTMLElement | null = document.getElementById("root");
+const ajax: XMLHttpRequest = new XMLHttpRequest();
 const content = document.createElement("div");
 const NEWS_URL = "https://api.hnpwa.com/v0/news/1.json";
 const CONTENT_URL = "https://api.hnpwa.com/v0/item/@id.json";
 
-const store = {
+const store: Store = {
   currentPage: 1,
-
-  // 1. read data를 매번 읽지 않을려면, 한번 읽으면 저장하고 있으면 됨
-  // 2. 그 저장한 데이터에다가 우리가 필요로 한 상태를 추가해 놓으면 됨
-  // 3. read data는 글을 읽었을 때도 참조해야 되고, 글 목록에서도 참조해야 되닌간 전역상태여야 함.
-  // 4. 그런 용도로 store 전역 상태를 만들어 놓은 것임
-  // 5. feed를 언제 처음 읽게 될 것인가 -> newsFeed 함수가 호출될 때 처음 읽게 됨
-  // 6. getData 네트워크를 통해서 가져오는 데이터를 newsFeed를 store.feed로 교체
   feeds: [],
 };
 
-function getData(url) {
+function getData<AjaxResponse>(url: string): AjaxResponse {
   ajax.open("GET", url, false);
   ajax.send();
   return JSON.parse(ajax.response);
 }
 
-// 새로 불러온 newsFeed에 읽었냐 안 읽었냐 라고 하는 상태를 추가해야함.
-function makeFeeds(feeds) {
+function makeFeeds(feeds: NewsFeed[]): NewsFeed[] {
   for (let i = 0; i < feeds.length; i++) {
     feeds[i].read = false;
   }
   return feeds;
 }
 
-function newsFeed() {
-  // const newsFeed = getData(NEWS_URL);
-  let newsFeed = store.feeds;
+function updateView(html: string): void {
+  if (container !== null) {
+    container.innerHTML = html;
+  } else {
+    console.error("최상위 컨테이너가 없어 UI를 진행하지 못합니다.");
+  }
+}
+
+function newsFeed(): void {
+  let newsFeed: NewsFeed[] = store.feeds;
   const newsList = [];
 
-  // 7. 처음엔 빈 배열이기 때문에, 최초의 한번은 getData해서 가져와야함.
-  // 8. 목록을 만들기 전에 체크
-  // 같은 데이터를 연속적으로 넣어줄 수 있음.
   if (newsFeed.length === 0) {
-    // 9. makeFeeds 를 가지고 getData를 한번 감싸주면, 결국 getData가 넘겨준 데이터가 makeFeeds로 가고
-    //    makeFeeds가 read라는 속성을 추가한 데이터를 넘겨줌
-    newsFeed = store.feeds = makeFeeds(getData(NEWS_URL));
+    newsFeed = store.feeds = makeFeeds(getData<NewsFeed[]>(NEWS_URL));
   }
 
   let template = `
@@ -98,16 +121,42 @@ function newsFeed() {
   template = template.replace("{{__news_feed__}}", newsList.join(""));
   template = template.replace(
     "{{__prev_page__}}",
-    store.currentPage + 1 ? store.currentPage - 1 : 1
+    String(store.currentPage + 1 ? store.currentPage - 1 : 1)
   );
-  template = template.replace("{{__next_page__}}", store.currentPage + 1);
+  template = template.replace(
+    "{{__next_page__}}",
+    String(store.currentPage + 1)
+  );
 
-  container.innerHTML = template;
+  updateView(template);
 }
 
-function newsDetail() {
+function makeComment(comments: NewsComment[]): string {
+  const commentString = [];
+
+  for (let i = 0; i < comments.length; i++) {
+    const comment: NewsComment = comments[i];
+
+    commentString.push(`
+      <div style="padding-left: ${comment.level * 40}px;" class="mt-4">
+        <div class="text-gray-400">
+          <i class="fa fa-sort-up mr-2"></i>
+          <strong>${comment.user}</strong> ${comment.time_ago}
+        </div>
+        <p class="text-gray-700">${comment.content}</p>
+      </div>
+    `);
+
+    if (comment.comments.length > 0) {
+      commentString.push(makeComment(comment.comments));
+    }
+  }
+  return commentString.join("");
+}
+
+function newsDetail(): void {
   const id = location.hash.substring(7);
-  const newsContent = getData(CONTENT_URL.replace("@id", id));
+  const newsContent = getData<NewsDetail>(CONTENT_URL.replace("@id", id));
   let template = `
   <div class="bg-gray-600 min-h-screen pb-8">
     <div class="bg-white text-xl">
@@ -142,34 +191,12 @@ function newsDetail() {
     }
   }
 
-  function makeComment(comments, called = 0) {
-    const commentString = [];
-
-    for (let i = 0; i < comments.length; i++) {
-      commentString.push(`
-        <div style="padding-left: ${called * 40}px;" class="mt-4">
-          <div class="text-gray-400">
-            <i class="fa fa-sort-up mr-2"></i>
-            <strong>${comments[i].user}</strong> ${comments[i].time_ago}
-          </div>
-          <p class="text-gray-700">${comments[i].content}</p>
-        </div>
-      `);
-
-      if (comments[i].comments.length > 0) {
-        commentString.push(makeComment(comments[i].comments, called + 1));
-      }
-    }
-    return commentString.join("");
-  }
-
-  container.innerHTML = template.replace(
-    "{{__comments__}}",
-    makeComment(newsContent.comments)
+  updateView(
+    template.replace("{{__comments__}}", makeComment(newsContent.comments))
   );
 }
 
-function router() {
+function router(): void {
   const routerPath = location.hash;
   if (routerPath === "") {
     newsFeed();
